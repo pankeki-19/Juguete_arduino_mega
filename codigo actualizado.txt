@@ -1,0 +1,97 @@
+// Incluye las librerías necesarias para la comunicación SPI y el manejo de los módulos RFID MFRC522.
+#include <SPI.h>
+#include <MFRC522.h>
+
+// Define el pin al que se conecta el LED en la placa de Arduino.
+#define LED_PIN 4
+// Define el pin de reset común para todos los módulos RFID.
+#define RST_PIN 5
+// Declara un arreglo de enteros con los pines de selección de esclavo (Slave Select, SS) para cada módulo RFID.
+const int SS_PINS[4] = { 53, 46, 42, 49 };
+
+// Crea un arreglo de cuatro objetos MFRC522, inicializando cada uno con su respectivo pin SS y el pin de reset común.
+MFRC522 mfrc[4] = {
+  MFRC522(SS_PINS[0], RST_PIN),
+  MFRC522(SS_PINS[1], RST_PIN),
+  MFRC522(SS_PINS[2], RST_PIN),
+  MFRC522(SS_PINS[3], RST_PIN)
+};
+
+// Define el número máximo de UIDs únicos que se pueden almacenar.
+const int MAX_STORED_UIDS = 10;
+// Declara un arreglo de cadenas para almacenar los UIDs de las tarjetas RFID leídas.
+String readUIDs[MAX_STORED_UIDS];
+// Inicializa un contador para llevar la cuenta de cuántos UIDs se han almacenado.
+int storedUIDsCount = 0;
+
+// La función setup() configura los elementos necesarios al iniciar el sketch.
+void setup() {
+    // Inicia la comunicación serial con una tasa de 115200 bits por segundo.
+    Serial.begin(115200);
+    // Inicia la comunicación SPI.
+    SPI.begin();
+    // Configura el pin del LED como salida.
+    pinMode(LED_PIN, OUTPUT);
+    // Inicializa cada uno de los módulos RFID llamando a PCD_Init().
+    for (int i = 0; i < 4; i++) {
+        mfrc[i].PCD_Init();
+    }
+}
+
+// Función auxiliar para convertir el UID de la tarjeta RFID a una cadena hexadecimal.
+String uidToString(byte* uid, byte uidLength) {
+    String uidStr = ""; // Inicia una cadena vacía.
+    for (byte i = 0; i < uidLength; i++) { // Recorre cada byte del UID.
+        if (uid[i] < 0x10) uidStr += "0"; // Añade un 0 delante si el byte es menor a 16 (0x10).
+        uidStr += String(uid[i], HEX); // Convierte el byte a hexadecimal y lo añade a la cadena.
+    }
+    uidStr.toUpperCase(); // Convierte la cadena a mayúsculas para estandarización.
+    return uidStr; // Devuelve la cadena formada.
+}
+
+// Función que verifica la presencia de una tarjeta RFID y procesa su UID.
+void checkForCard(MFRC522& mfrc522) {
+    // Verifica si hay una nueva tarjeta presente y si se puede leer su UID.
+    if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
+        String uidStr = uidToString(mfrc522.uid.uidByte, mfrc522.uid.size); // Convierte el UID a string.
+        bool alreadyRead = false; // Bandera para verificar si el UID ya fue procesado.
+        // Busca el UID en el arreglo de UIDs almacenados.
+        for (int i = 0; i < storedUIDsCount; i++) {
+            if (readUIDs[i] == uidStr) {
+                alreadyRead = true; // Si el UID ya está almacenado, activa la bandera.
+                break;
+            }
+        }
+
+        // Si el UID no ha sido leído anteriormente, procede.
+        if (!alreadyRead) {
+            if (storedUIDsCount < MAX_STORED_UIDS) { // Verifica que no se exceda el límite de almacenamiento.
+                readUIDs[storedUIDsCount++] = uidStr; // Almacena el nuevo UID.
+                // Enciende el LED por 5 segundos.
+                digitalWrite(LED_PIN, HIGH);
+                delay(5000);
+                digitalWrite(LED_PIN, LOW);
+            }
+            else {
+                // Si se alcanzó el límite de almacenamiento, imprime un mensaje.
+                Serial.println("Límite de almacenamiento de UIDs alcanzado.");
+            }
+        }
+        else {
+            // Si el UID ya ha sido leído, imprime un mensaje indicándolo.
+            Serial.println("Tarjeta ya registrada en el sistema.");
+        }
+        // Desactiva la tarjeta para evitar nuevas lecturas inmediatas.
+        mfrc522.PICC_HaltA();
+    }
+}
+
+// La función loop() se ejecuta constantemente, verificando la presencia de tarjetas en los lectores.
+void loop() {
+    // Verifica cada uno de los lectores RFID en busca de tarjetas.
+    for (int i = 0; i < 4; i++) {
+        checkForCard(mfrc[i]);
+    }
+    // Pequeña pausa para estabilizar el bucle.
+    delay(250);
+}
